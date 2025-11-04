@@ -29,6 +29,7 @@ export function setupGame(type = 'Random'){
         s.gameType = type;
         s.starterDice = starterDice;
         s.round = 'dice';
+        s.viewing = 'player';
         s.roundLog = [];
         for(let i = 0; i < core.numRounds; i++){
             let dice = [];

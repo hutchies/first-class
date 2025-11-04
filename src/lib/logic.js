@@ -16,7 +16,6 @@ function nextLetter(l){
 }
 
 
-
 export function solve(){
     state.update(s => {
         s.savedLog = JSON.parse(JSON.stringify(s.roundLog));
@@ -45,12 +44,6 @@ export function solve(){
         }
         //console.log('after dice', possibles);
         possibles = possibles.sort((a,b) => score(b, i).value - score(a, i).value);
-        console.log(`All possible for round ${i+1}`, possibles.map(p => {
-            return {
-                word: p,
-                score: score(p, i).value
-            }
-        }));
         let chosen = possibles[0];
         if(!chosen){
             console.log('No possible word for this round!');
@@ -94,10 +87,10 @@ export function score(word, roundNum){
     let prevWord = false;
     if(roundNum > 0) prevWord = get(state).roundLog[roundNum - 1].realWord;
     let score = 0;
+    if(word && prevWord && word.localeCompare(prevWord) <= 0) return {value: 0, alphabet: true, warning: 'not in alphabetical order'}
     if(word.includes(round.banned)) return {value: 0, banned: true, warning: 'banned letter'} // mark a flag too?
     if(!sowpods.verify(word)) return {value: 0, warning: 'not a word'};
-    if(word && prevWord && word.localeCompare(prevWord) <= 0) return {value: 0, alphabet: true, warning: 'not in alphabetical order'}
-    
+        
     let count = round.dice.filter(d => word.includes(d)).length;
     let multiplier = 1;
     if(count == 3) multiplier = 2; // All letters included!

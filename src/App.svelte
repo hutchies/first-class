@@ -52,20 +52,32 @@
 
   let secsRemaining = 40;
   let timerFinished = false;
+
+
+function stats(){
+    let scores = [];
+    for(let i of Array(100)){
+        setupGame();
+        solve();
+        scores.push($state.roundLog.reduce((a, r, i) => a + score(r.realWord, i).value, 0));
+    }
+    console.log(scores, scores.reduce((a, s) => a+s, 0) / scores.length, Math.max(...scores), Math.min(...scores));
+}
   
 </script>
 
 <main>
   <h1>First Class Letters solo challenge</h1>
   <div style="margin-bottom: 1em;">
-    Based on the <a href="https://boardgamegeek.com/boardgame/436932/first-class-letters">game by Peter Hayward</a>
+    Based on the <a href="https://boardgamegeek.com/boardgame/436932/first-class-letters">game by Peter Hayward</a>.
+    Uses the SOWPODS word list from the <a href="https://github.com/pillowfication/pf-sowpods">pf-sowpods library</a>.
   </div>
   {#if $state.gameType}
     <div class="top">
       <div class="challenge_type">
         {$state.gameType} challenge
       </div>
-      {#if $state.round > 0 && $state.round < $state.roundLog.length + 1}
+      <!--{#if $state.round > 0 && $state.round < $state.roundLog.length + 1}
         <div class="timer {secsRemaining < 10 ? 'ending' : ''}">
           {#if secsRemaining}
             {secsRemaining} seconds left
@@ -73,7 +85,7 @@
             Time up!
           {/if}
         </div>
-      {/if}
+      {/if}-->
     </div>
   {/if}
   {#if $state.round == 'setup'}
@@ -91,7 +103,7 @@
     </div>
   {:else}
   <div class="vertical">
-    <div class="alphabet {$state.roundLog.some((r, i) => score(r.realWord, i).alphabet) ? 'blocked' : ''}">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div${$state.roundLog.some(r => (r.realWord || r.startingLetter || '').startsWith(s)) ? ' style="color: yellow;"' : ''}>${s}</div>`).join('')}</div>
+    <div class="alphabet {score($state.roundLog[$state.round - 1].realWord, $state.round - 1).alphabet ? 'blocked' : ''}">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div${$state.roundLog.some(r => (r.realWord || r.startingLetter || '').startsWith(s)) ? ' style="color: yellow;"' : ''}>${s}</div>`).join('')}</div>
     <div class="gamesheet">
         {#each $state.roundLog as rl, i}
           {@const roundScore = score(rl.realWord, i)}
@@ -130,11 +142,11 @@
               <div class="score {roundScore.value == 0 ? 'zero' : ''}">
                 {#if rl.realWord}{roundScore.value}{/if}
               </div>
-              <div class="next">
+              <div class="next {secsRemaining < 10 ? 'ending' : ''}">
                 {#if i == $state.round - 1 && $state.round < $state.roundLog.length}
-                  <button on:click={next}>Next</button>
+                  <button on:click={next}>{secsRemaining ? `${secsRemaining}s` : 'Next'}</button>
                 {:else if i == $state.round - 1 && $state.round == $state.roundLog.length}
-                  <button on:click={next}>Done</button>
+                  <button on:click={next}>{secsRemaining ? `${secsRemaining}s` : 'Finish'}</button>
                 {/if}
               </div>
             </div>
@@ -172,6 +184,7 @@
     <button on:click={e => {$state.gameType = false; $state.round = 'setup'}}>Abandon and start new game</button>
   {/if}
   {/if}
+  <br>
 </main>
 
 <style>
@@ -223,14 +236,15 @@
     padding: 0.5em;
   }
 
-  .ending {
-    background-color: red;
-  }
 
   .next button {
     background-color: green;
     color: white;
     border: none;
+  }
+
+  .ending button{
+    background-color: red;
   }
 
   .next {
@@ -266,7 +280,7 @@
   .row {
     padding: 0.5em;
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 0.5em;
     align-items: center;
   }
@@ -302,7 +316,7 @@
     color: white;
     font-weight: bold;
     align-items: center;
-    justify-content: center;
+    justify-content: space-evenly;
     font-size: 0.8em;
     padding-left: 0.5em;
     padding-right: 0.5em;
