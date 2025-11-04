@@ -103,7 +103,7 @@ function stats(){
     </div>
   {:else}
   <div class="vertical">
-    <div class="alphabet {score($state.roundLog[$state.round - 1].realWord, $state.round - 1).alphabet ? 'blocked' : ''}">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div${$state.roundLog.some(r => (r.realWord || r.startingLetter || '').startsWith(s)) ? ' style="color: yellow;"' : ''}>${s}</div>`).join('')}</div>
+    <div class="alphabet {$state.round < $state.roundLog.length && score($state.roundLog[$state.round - 1].realWord, $state.round - 1).alphabet ? 'blocked' : ''}">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div${$state.roundLog.some(r => (r.realWord || r.startingLetter || '').startsWith(s)) ? ' style="color: yellow;"' : ''}>${s}</div>`).join('')}</div>
     <div class="gamesheet">
         {#each $state.roundLog as rl, i}
           {@const roundScore = score(rl.realWord, i)}
