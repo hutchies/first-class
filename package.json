@@ -18,6 +18,7 @@
     "easytimer.js": "^4.6.0",
     "english-words": "^0.0.1",
     "nanoid": "^5.1.6",
-    "pf-sowpods": "^1.2.1"
+    "pf-sowpods": "^1.2.1",
+    "seedrandom": "^3.0.5"
   }
 }

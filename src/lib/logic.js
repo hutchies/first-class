@@ -5,8 +5,9 @@ import sowpods from 'pf-sowpods';
 
 import { get } from 'svelte/store';
 import { state } from './stores';
-import Alea from 'alea';
+import seedrandom from 'seedrandom';
 import { nanoid } from 'nanoid';
+import { tick } from 'svelte';
 
 
 function nextLetter(l){
@@ -16,11 +17,149 @@ function nextLetter(l){
 }
 
 
-export function solve(){
+export async function solve(){
+    let already = false;
     state.update(s => {
         s.savedLog = JSON.parse(JSON.stringify(s.roundLog));
+        if(s.botLog){
+            s.roundLog = JSON.parse(JSON.stringify(s.botLog));
+            s.viewing = 'solution';
+            already = true;
+        }else{
+            for(let r of s.roundLog){
+                r.realWord = '';
+                r.word = '';
+                r.filled = false;
+                r.score = {value: 0};
+            }
+        }
         return s;
     })
+    if(already) return;
+    for(let r = 0; r < get(state).diceList.length; r++){
+        console.log(`Solving round ${r + 1}`, get(state).diceList[r]);
+        state.update(s => {
+            s.solving = `Solving round ${r + 1}...`
+            return s;
+        })
+        await tick();
+        let dl = get(state).diceList[r];
+        let dice = dl.dice;
+        let banned = dl.banned;
+
+        // Do it all in a single loop around the sowpods for max speed, if I can
+        let max = {
+            word: '',
+            score: 0,
+            index: -1
+        }
+        let prev = [];
+        let next = [];
+        for(let i = 0; i < get(state).roundLog.length; i++){
+            prev[i] = false;
+            next[i] = false;
+            let temp = i;
+            while(temp > 0 && !prev[i]){
+                temp--;
+                prev[i] = get(state).roundLog[temp].realWord || get(state).roundLog[temp].startingLetter || false; 
+            }
+            temp = i;
+            while(temp < get(state).roundLog.length - 1 && !next[i]){
+                temp++;
+                next[i] = get(state).roundLog[temp].realWord || get(state).roundLog[temp].startingLetter || false; 
+            }
+        }
+
+        for(let index = 0; index < sowpods.length; index++){
+            let w = sowpods[index];
+            if(w.includes(r.banned)) continue;
+            if(!dice.some(d => w.includes(d))) continue;
+            let score = nonAlterScore(r, 0, w).value;
+            if(score <= max.score) continue; // Only if it scores bigger than before
+
+            // So now it could be the best option, work out where it can go
+            for(let i = 0; i < get(state).roundLog.length; i++){
+                let s = get(state).roundLog[i];
+                if(s.filled) continue;
+                if(s.startingLetter && !w.startsWith(s.startingLetter)) continue;
+                if(prev[i] && w.localeCompare(prev[i]) <= 0) continue;
+                if(next[i] && w.localeCompare(next[i]) >= 0) continue;
+                // Valid, so slot it in here and don't search any more slots
+                max.word = w;
+                max.index = i;
+                max.score = score;
+                break;
+            }
+        }
+        /*
+        // Basic filtering to have at least one letter in and not banned, i.e. non-zero score
+        let possibles = sowpods.filter(w => !w.includes(r.banned) && dice.some(d => w.includes(d)));
+        possibles = possibles.sort((a,b) => nonAlterScore(r, 0, b).value - nonAlterScore(r, 0, a).value);
+        let max = {
+            score: 0,
+            index: -1,
+            word: ''
+        };
+        let savedPossibles = [...possibles];
+        for(let i = 0; i < get(state).roundLog.length; i++){
+            let s = get(state).roundLog[i];
+            if(s.filled) continue;
+            possibles = [...savedPossibles];
+            let prev, next = false;
+            let temp = i;
+            if(s.startingLetter) possibles = possibles.filter(w => w.startsWith(s.startingLetter));
+            while(temp > 0 && !prev){
+                temp--;
+                prev = get(state).roundLog[temp].realWord || get(state).roundLog[temp].startingLetter || false; 
+            }
+            temp = i;
+            while(temp < get(state).roundLog.length - 1 && !next){
+                temp++;
+                next = get(state).roundLog[temp].realWord || get(state).roundLog[temp].startingLetter || false; 
+            }
+            // now we have betweens
+            if(prev) possibles = possibles.filter(w => w.localeCompare(prev) > 0);
+            if(next) possibles = possibles.filter(w => w.localeCompare(next) < 0);
+            // Should still be sorted by score
+            if(possibles.length > 0){
+                let s = nonAlterScore(r, 0, possibles[0]).value;
+                if(s > max.score){
+                    max.score = s;
+                    max.index = i;
+                    max.word = possibles[0];
+                }
+            }
+        }*/
+        if(max.index == -1){
+            // need to blank one, so blank the first free one
+            let rl = get(state).roundLog.find(r => !r.filled);
+            rl.dice = [...dl.dice];
+            rl.banned = dl.banned;
+            rl.realWord = '';
+            rl.word = '';
+            rl.score = {value: 0, failed: true}
+            rl.filled = true;
+            rl.round = r + 1;
+        }else{
+            console.log('found max', max);
+            let rl = get(state).roundLog[max.index];
+            rl.realWord = max.word;
+            rl.word = max.word;
+            rl.filled = true;
+            rl.dice = [...dl.dice];
+            rl.banned = dl.banned;
+            if(rl.startingLetter) rl.word = max.word.slice(1);
+            rl.score = nonAlterScore(r, max.index, max.word);
+            rl.round = r + 1;
+        }
+    }
+    console.log('solved', get(state).roundLog);
+    state.update(s => {
+        s.viewing = 'solution';
+        s.solving = false;
+        return s;
+    })
+    return;
     for(let i = 0; i < get(state).roundLog.length; i++){
         let r = get(state).roundLog[i];
         let prev = false;
@@ -67,14 +206,110 @@ export function solve(){
 
 export function unsolve(){
     state.update(s => {
+        s.botLog = JSON.parse(JSON.stringify(s.roundLog));
         s.roundLog = JSON.parse(JSON.stringify(s.savedLog));
         s.viewing = 'player';
-        s.savedLog = [];
         return s;
     })
 }
 
-export function score(word, roundNum){
+function setScore(i, score){
+    state.update(s => {
+            s.roundLog[i].score = score;
+            return s;
+        })
+
+        return score;
+}
+
+export function fix(row){
+    state.update(s => {
+        s.roundLog[row].filled = true;
+        s.roundLog[row].dice = s.diceList[s.round - 1].dice;
+        s.roundLog[row].banned = s.diceList[s.round - 1].banned;
+        s.roundLog[row].round = s.round;
+        if(s.roundLog[row].score.failed){
+            s.roundLog[row].realWord = '';
+            s.roundLog[row].word = '';
+        }
+        return s;
+    })
+}
+
+export function outOfOrder(i){
+    let r = get(state).roundLog[i];
+    let word = r.realWord;
+    if(!word) return false;
+    for(let ind = 0; ind < get(state).roundLog.length; ind++){
+        if(ind == i) continue;
+        let test = get(state).roundLog[ind].realWord || get(state).roundLog[ind].startingLetter;
+        if(!test) continue;
+        if(ind < i && word.localeCompare(test) < 0) return true;
+        if(ind > i && word.localeCompare(test) > 0) return true;
+    }
+}
+
+function nonAlterScore(roundNum, i, word = false){ // i no longer needed = remove!
+    let diceList = get(state).diceList[roundNum];
+    let dice = diceList.dice;
+    let banned = diceList.banned;
+    let round = get(state).roundLog[i];
+
+    
+    if(!word) word = round.realWord;
+    //console.log('scoring', round, dice, word)
+    if(!word){
+        return {value: 0, failed: true};
+    }
+    /*let prevWord = false;
+    if(i > 0) prevWord = get(state).roundLog[i - 1].realWord;*/
+    let score = 0;
+    let warning = false;
+    if(!sowpods.verify(word)){
+        return {value: 0, failed: true};
+    }
+    /*if(word && prevWord && word.localeCompare(prevWord) <= 0){
+        return setScore(i, {value: 0, alphabet: true, warning: 'not in alphabetical order'});
+        return {value: 0, alphabet: true, warning: 'not in alphabetical order'}
+    }*/
+   
+    if(word.includes(banned)){
+        return {value: 0, banned: true};
+
+    }
+    
+    // check alphabetisation
+    if(get(state).roundLog.slice(0, i).some(r => (r.realWord || r.startingLetter || '').localeCompare(word) > 0)
+    || get(state).roundLog.slice(i+1).some(r => (r.realWord || r.startingLetter || '').localeCompare(word) < 0)){
+        warning = `alphabetisation broken`;
+    }
+        
+    let count = dice.filter(d => word.includes(d)).length;
+    let multiplier = 1;
+    if(count == 3) multiplier = 2; // All letters included!
+    let split = word.split(''); // into array
+    let diceCounts = {};
+    let ticks = 0;
+    for(let c of split){
+        let matched = dice.find(d => d == c);
+        if(matched){
+            ticks++;
+            diceCounts[matched] = (diceCounts[matched] || 0) + 1;
+            score += multiplier;
+        }
+    }
+   // setScore(roundNum, score);
+    return  {
+        value: score,
+        diceCounts,
+        ticks,
+        warning,
+        multiplier
+        // extra info
+    };
+}
+
+export function score(roundNum, i){
     // Not checking if the word is allowed within the overall structure,
     // just what it scores now
     // Presumes word supplied is uppercase
@@ -82,46 +317,24 @@ export function score(word, roundNum){
         dice: ['A', 'H', 'K'],
         banned: ['X']
     }*/
-    if(!word) return {value: 0};
-    let round = get(state).roundLog[roundNum];
-    let prevWord = false;
-    if(roundNum > 0) prevWord = get(state).roundLog[roundNum - 1].realWord;
-    let score = 0;
-    if(word && prevWord && word.localeCompare(prevWord) <= 0) return {value: 0, alphabet: true, warning: 'not in alphabetical order'}
-    if(word.includes(round.banned)) return {value: 0, banned: true, warning: 'banned letter'} // mark a flag too?
-    if(!sowpods.verify(word)) return {value: 0, warning: 'not a word'};
-        
-    let count = round.dice.filter(d => word.includes(d)).length;
-    let multiplier = 1;
-    if(count == 3) multiplier = 2; // All letters included!
-    let split = word.split(''); // into array
-    let diceCounts = {};
-    let ticks = 0;
-    for(let c of split){
-        let matched = round.dice.find(d => d == c);
-        if(matched){
-            ticks++;
-            diceCounts[matched] = (diceCounts[matched] || 0) + 1;
-            score += multiplier;
-        }
-    }
-    return {
-        value: score,
-        diceCounts,
-        ticks,
-        multiplier
-        // extra info
-    };
+    let score = nonAlterScore(roundNum, i);
+    return setScore(i, score);
 }
 
-let random = new Alea();
+export function rescoreAll(){
+    for(let i = 0; i < get(state).roundLog.length; i++){
+        score(get(state).roundLog[i].round, i);
+    }
+}
+
+let rng = seedrandom();
 
 export function newRandom(seed = nanoid()){
-    random = new Alea(seed);
+    rng = seedrandom(seed); 
 }
 
 export function randomIndex(array){
-    return Math.floor(random() * array.length);
+    return Math.floor(rng() * array.length);
 }
 
 export function randomItem(array){

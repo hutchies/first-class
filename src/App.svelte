@@ -4,9 +4,9 @@
   import svelteLogo from './assets/svelte.svg'
   import viteLogo from '/vite.svg'
   import Counter from './lib/Counter.svelte'
-    import { score, solve, unsolve } from './lib/logic';
+    import { fix, outOfOrder, score, solve, unsolve } from './lib/logic';
     import { state } from './lib/stores';
-    import { setupGame } from './lib/phases';
+    import { advance, choose, endGame, setupGame, toggle } from './lib/phases';
     import { onMount, tick } from 'svelte';
     import { Timer }  from 'easytimer.js';
 
@@ -14,18 +14,25 @@
   let wordComponents = [];
   let timer = new Timer();
 
-  function next(){
+  async function next(forced = false){
+   
+    if(currentRow != -1){
+       fix(currentRow);
+    }
     if($state.round < $state.roundLog.length + 1){
       $state.round++;
-      if(wordComponents[$state.round - 1]){
+      let topPoss = $state.roundLog.findIndex(r => !r.filled);
+      if(wordComponents[topPoss]){
         queueMicrotask(() => {
-          console.log($state.round, wordComponents[$state.round - 1])
-          wordComponents[$state.round - 1].focus();
+          wordComponents[topPoss].focus();
         });
       }
       startTimer();
-    }else{
-      timerFinished
+    }
+    if($state.round >= $state.roundLog.length + 1){
+        timer.stop();
+        timerFinished = true;
+        endGame();
     }
   }
 
@@ -38,7 +45,11 @@
       startValues: {seconds: 40},
       callback: (timer) => {
         secsRemaining = timer.getTimeValues().seconds;
-        if(secsRemaining == 0) timerFinished = true;
+        if(secsRemaining == 0){
+          timerFinished = true;
+          if(currentRow != -1 && $state.round < $state.roundLog.length) score($state.round - 1, currentRow);
+          // Force clearing of a thing if need be
+        }
       }
     });
   }
@@ -53,16 +64,60 @@
   let secsRemaining = 40;
   let timerFinished = false;
 
+  let currentRow = 0;
+
 
 function stats(){
     let scores = [];
     for(let i of Array(100)){
         setupGame();
         solve();
-        scores.push($state.roundLog.reduce((a, r, i) => a + score(r.realWord, i).value, 0));
+        scores.push($state.total);
     }
     console.log(scores, scores.reduce((a, s) => a+s, 0) / scores.length, Math.max(...scores), Math.min(...scores));
 }
+
+function extraClass(r, i){
+  if(r.filled){
+    if(r.score && r.score.value == 0) return 'failed';
+    if(outOfOrder(i)) return 'out_of_order';
+    return 'filled';
+  }else if($state.roundLog[currentRow] == r){
+    return '';
+  }else{
+    return ''
+  }
+}
+
+function clearPrev(i){
+  if(currentRow != -1 && currentRow != i){
+    if(!$state.roundLog[currentRow].filled){
+      $state.roundLog[currentRow].word = '';
+      $state.roundLog[currentRow].realWord = '';
+      $state.roundLog[currentRow].score = {value: 0};
+    }
+  }
+}
+
+function getColour(s){
+  let rl = $state.roundLog.filter(r => (r.realWord || r.startingLetter || '').startsWith(s))
+  if(rl.length > 0){
+    if($state.roundLog.some((r, i) => outOfOrder(i) && (r.realWord || r.startingLetter || '').startsWith(s))) return 'style="color: orange;"'
+    return 'style="color: lightgreen;"' // add something for clashes
+  }else{
+    return '';
+  }
+}
+
+async function copySeed(){
+  await navigator.clipboard.writeText($state.seed);
+  message = `Seed copied`;
+  setTimeout(() => message = `Click to copy seed`, 5000);
+}
+
+let message = `Click to copy seed`;
+
+$: $state.total = $state.roundLog.reduce((a, r) => a + r.score.value, 0);
   
 </script>
 
@@ -74,9 +129,23 @@ function stats(){
   </div>
   {#if $state.gameType}
     <div class="top">
-      <div class="challenge_type">
+      <div class="challenge_type" on:click={copySeed}>
         {$state.gameType} challenge
+        {#if $state.gameType == 'Random'}
+          <div class="seed">{message}</div>
+        {/if}
       </div>
+      {#if $state.round < $state.roundLog.length + 1}
+          {@const r = $state.diceList[$state.round - 1]}
+          <div class="dice_set">
+            {#each r.dice as d}
+              <div class="dice {currentRow != -1 && $state.roundLog[currentRow].score.diceCounts && $state.roundLog[currentRow].score.diceCounts[d] ? 'counted' : ''}">
+                {d}
+              </div>
+            {/each}
+              <div class="dice {currentRow != - 1 && $state.roundLog[currentRow].score.banned ? 'blocked' : 'banned'}">{r.banned}</div>
+          </div>
+        {/if}
       <!--{#if $state.round > 0 && $state.round < $state.roundLog.length + 1}
         <div class="timer {secsRemaining < 10 ? 'ending' : ''}">
           {#if secsRemaining}
@@ -86,11 +155,21 @@ function stats(){
           {/if}
         </div>
       {/if}-->
-    </div>
-  {/if}
+       {#if $state.choosing}
+          <div class="message">
+            {$state.choiceMessage}
+            {#if $state.selection != -1}
+              <button on:click={advance}>Choose</button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+   
   {#if $state.round == 'setup'}
     <button on:click={e => {setupGame('Daily')}}>Play daily challenge!</button>
     <button on:click={e => {setupGame('Random')}}>Play random setup!</button>
+    <button on:click={e => {let seed = prompt('Enter seed for game:'); setupGame('Random', seed)}}>Use existing seed!</button>
   {:else if $state.round == 'dice'}
     <div class="starter_dice">
       Starter dice:
@@ -103,31 +182,43 @@ function stats(){
     </div>
   {:else}
   <div class="vertical">
-    <div class="alphabet {$state.round < $state.roundLog.length && score($state.roundLog[$state.round - 1].realWord, $state.round - 1).alphabet ? 'blocked' : ''}">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div${$state.roundLog.some(r => (r.realWord || r.startingLetter || '').startsWith(s)) ? ' style="color: yellow;"' : ''}>${s}</div>`).join('')}</div>
+    <div class="alphabet">{@html 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(s => `<div ${getColour(s, $state)}>${s}</div>`).join('')}</div>
     <div class="gamesheet">
         {#each $state.roundLog as rl, i}
-          {@const roundScore = score(rl.realWord, i)}
-            <div class="row {i % 2 == 1 ? 'stripe' : ''}">
+          {@const roundScore = rl.score}
+            <div class="row {i % 2 == 1 ? 'stripe' : ''}" class.choosing={$state.choosing} class:selectedRow={$state.selection == i} on:click={e => {toggle(i); if(!rl.filled) currentRow = i;}}>
+              <div class="round_count">{rl.round || ''}</div>
               <div class="dice_set">
                 {#each rl.dice as d}
                   <div class="dice {roundScore.diceCounts && roundScore.diceCounts[d] ? 'counted' : ''}">
-                    {#if $state.round > i}{d}{/if}
+                    {d}
                   </div>
                 {/each}
-                  <div class="dice {roundScore.banned ? 'blocked' : 'banned'}">{#if $state.round > i}{rl.banned}{/if}</div>
+                  <div class="dice {rl.banned && roundScore.banned ? 'blocked' : 'banned'}">{rl.banned}</div>
               </div>
                 {#if rl.startingLetter}
                   <div class="merge expand">
-                    <div class="starter text">{rl.startingLetter || ''}</div><input bind:this={wordComponents[i]} class="text short expand" disabled={$state.round != i + 1 || timerFinished}  bind:value={rl.word} on:keyup={e => {if(e.key == 'Enter') next();}} on:input={e => {rl.realWord = rl.word.toUpperCase(); if(rl.startingLetter) rl.realWord = rl.startingLetter + rl.realWord; }} /> 
+                    <div class="starter text">{rl.startingLetter || ''}</div><input bind:this={wordComponents[i]} class="text short expand {extraClass(rl, i)}" disabled={rl.filled || timerFinished} on:focus={e => {clearPrev(i); currentRow = i;}}  bind:value={rl.word} on:keyup={e => {if(e.key == 'Enter') next();}} on:input={e => {rl.realWord = rl.word.toUpperCase(); if(rl.startingLetter) rl.realWord = rl.startingLetter + rl.realWord; score($state.round - 1, i); }} /> 
                   </div>
                 {:else}
-                  <input bind:this={wordComponents[i]} disabled={$state.round != i + 1 || timerFinished} class="text expand" bind:value={rl.word} on:keyup={e => {if(e.key == 'Enter') next();}}  on:input={e => {rl.realWord = rl.word.toUpperCase(); if(rl.startingLetter) rl.realWord = rl.startingLetter + rl.realWord; }} /> 
+                  <input bind:this={wordComponents[i]} disabled={rl.filled || timerFinished} class="text expand {extraClass(rl, i)}" bind:value={rl.word} on:keyup={e => {if(e.key == 'Enter') next();}} on:focus={e => {clearPrev(i); currentRow = i;}} on:input={e => {rl.realWord = rl.word.toUpperCase(); if(rl.startingLetter) rl.realWord = rl.startingLetter + rl.realWord; score($state.round - 1, i); }} /> 
                 {/if}
-              {#if roundScore.warning}
-                <div class="warning" title={roundScore.warning}>
+              {#if outOfOrder(i, $state)}
+                <div class="warning" title="Out of alphabet order!">
                   ⚠️
                 </div>
               {/if}
+               <div class="next {secsRemaining < 10 && (!timerFinished || !roundScore.value) ? 'ending' : ''}">
+                {#if i == currentRow && $state.round <= $state.roundLog.length}
+                  {#if secsRemaining} 
+                    <button on:click={next}>{secsRemaining}s</button>
+                  {:else if roundScore.failed}
+                    <button on:click={next}>Wipe</button>
+                  {:else}
+                    <button on:click={next}>OK</button>
+                  {/if}
+                {/if}
+              </div>
               <div class="matches">
                 {#each Array(roundScore.ticks || 0) as _}
                   ✔️
@@ -139,29 +230,23 @@ function stats(){
                 {/if}
               </div>
               
-              <div class="score {roundScore.value == 0 ? 'zero' : ''}">
+              <div class="score {roundScore.value == 0 || outOfOrder(i, $state) ? 'zero' : ''}">
                 {#if rl.realWord}{roundScore.value}{/if}
               </div>
-              <div class="next {secsRemaining < 10 ? 'ending' : ''}">
-                {#if i == $state.round - 1 && $state.round < $state.roundLog.length}
-                  <button on:click={next}>{secsRemaining ? `${secsRemaining}s` : 'Next'}</button>
-                {:else if i == $state.round - 1 && $state.round == $state.roundLog.length}
-                  <button on:click={next}>{secsRemaining ? `${secsRemaining}s` : 'Finish'}</button>
-                {/if}
-              </div>
+             
             </div>
         {/each}
-        {#if $state.round == $state.roundLog.length + 1}
+        {#if $state.round == $state.roundLog.length + 1  && !$state.choosing}
           <div class="row total">
             {#if $state.round == $state.roundLog.length + 1}
               {#if $state.viewing == 'player'}
-                <button on:click={solve}>See bot solution</button>
+                <button on:click={solve}>{$state.solving || 'See bot solution'}</button>
               {:else}
                 <button on:click={unsolve}>See your solution</button>
               {/if}   
             {/if}
             <div>TOTAL:</div>
-            <div class="score">{$state.roundLog.reduce((a, r, i) => a + score(r.realWord, i).value, 0)}</div>
+            <div class="score">{$state.total}</div>
           </div>
         {/if}
         <div>
@@ -178,11 +263,13 @@ function stats(){
   </div>
     
   <br>
-  {#if $state.round == $state.roundLog.length + 1}
-    <button on:click={e => {$state.gameType = false; $state.round = 'setup'}}>New game</button>
-  {:else}
-    <button on:click={e => {$state.gameType = false; $state.round = 'setup'}}>Abandon and start new game</button>
-  {/if}
+  
+    {#if $state.round == $state.roundLog.length + 1 && !$state.choosing}
+      <button on:click={e => {$state.gameType = false; $state.round = 'setup'}}>New game</button>
+    {:else}
+      <button on:click={e => {$state.gameType = false; $state.round = 'setup'}}>Abandon and start new game</button>
+    {/if}
+    
   {/if}
   <br>
 </main>
@@ -190,6 +277,15 @@ function stats(){
 <style>
   :global(body){
     font-family: sans-serif;
+  }
+  
+  .round_count {
+    width: 1em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: darkgreen;
+    font-weight: bold;
   }
 
   .top {
@@ -205,6 +301,10 @@ function stats(){
     background-color: lemonchiffon;
     font-weight: bold;
     padding: 0.5em;
+  }
+
+  .seed {
+    font-weight: bold;
   }
 
   .total {
@@ -257,6 +357,11 @@ function stats(){
 
   }
 
+  .message {
+    font-weight: bold;
+    color: red;
+  }
+
   .matches {
     border: 1px solid black;
     min-width: 5em;
@@ -283,6 +388,14 @@ function stats(){
     flex-wrap: wrap;
     gap: 0.5em;
     align-items: center;
+  }
+
+  .selectedRow {
+    background-color: yellow;
+  }
+
+  .choosing {
+    cursor: pointer;
   }
 
   h1 {
@@ -375,6 +488,18 @@ function stats(){
     font-weight: bold;
     font-size: 1.2em;
     width: 10em;
+  }
+
+  .filled {
+    background-color: lightgreen;
+  }
+
+  .failed {
+    background-color: lightpink;
+  }
+
+  .out_of_order {
+    background-color: #FFD580;
   }
 
   .short {
