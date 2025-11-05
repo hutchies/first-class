@@ -212,8 +212,8 @@ $: $state.total = $state.roundLog.reduce((a, r) => a + r.score.value, 0);
                 {#if i == currentRow && $state.round <= $state.roundLog.length}
                   {#if secsRemaining} 
                     <button on:click={next}>{secsRemaining}s</button>
-                  {:else if roundScore.failed}
-                    <button on:click={next}>Wipe</button>
+                  <!--{:else if roundScore.failed}
+                    <button on:click={next}>Wipe</button>-->
                   {:else}
                     <button on:click={next}>OK</button>
                   {/if}
