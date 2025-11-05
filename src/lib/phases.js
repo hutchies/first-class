@@ -99,6 +99,7 @@ export function setupGame(type = 'Random', seed = false){
         s.round = 'dice';
         s.viewing = 'player';
         s.roundLog = [];
+        s.botLog = false;
         s.total = 0;
         s.solving = false;
         s.diceList = []
